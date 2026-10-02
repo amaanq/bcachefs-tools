@@ -89,7 +89,8 @@ static int error_entry_cmp(const void *_l, const void *_r)
 	const struct bch_sb_field_error_entry *l = _l;
 	const struct bch_sb_field_error_entry *r = _r;
 
-	return -cmp_int(l->last_error_time, r->last_error_time);
+	return -cmp_int(le64_to_cpu(l->last_error_time),
+			le64_to_cpu(r->last_error_time));
 }
 
 DEFINE_DARRAY(bch_sb_field_error_entry);
