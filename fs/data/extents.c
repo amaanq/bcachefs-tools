@@ -1833,7 +1833,8 @@ __cold void bch2_extent_crc_unpacked_to_text(struct printbuf *out, struct bch_ex
 		   crc->uncompressed_size,
 		   crc->offset, crc->nonce);
 	bch2_prt_csum_type(out, crc->csum_type);
-	prt_printf(out, " %0llx:%0llx ", crc->csum.hi, crc->csum.lo);
+	prt_printf(out, " %0llx:%0llx ",
+		   le64_to_cpu(crc->csum.hi), le64_to_cpu(crc->csum.lo));
 	prt_str(out, " compress ");
 	bch2_prt_compression_type(out, crc->compression_type);
 }

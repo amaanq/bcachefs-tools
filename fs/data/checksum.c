@@ -364,10 +364,10 @@ int bch2_rechecksum_bio(struct bch_fs *c, struct bio *bio,
 		prt_printf(&buf, "checksum error in %s() (memory corruption or bug?)\n"
 			   "  expected %0llx:%0llx got %0llx:%0llx (old type ",
 			   __func__,
-			   crc_old.csum.hi,
-			   crc_old.csum.lo,
-			   merged.hi,
-			   merged.lo);
+			   le64_to_cpu(crc_old.csum.hi),
+			   le64_to_cpu(crc_old.csum.lo),
+			   le64_to_cpu(merged.hi),
+			   le64_to_cpu(merged.lo));
 		bch2_prt_csum_type(&buf, crc_old.csum_type);
 		prt_str(&buf, " new type ");
 		bch2_prt_csum_type(&buf, new_csum_type);

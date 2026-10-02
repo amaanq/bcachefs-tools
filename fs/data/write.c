@@ -1902,10 +1902,10 @@ csum_err:
 	bch2_write_op_error(op, false, op->pos.offset,
 		"error verifying existing checksum while moving existing data (memory corruption?)\n"
 		"  expected %0llx:%0llx got %0llx:%0llx type %s",
-		op->crc.csum.hi,
-		op->crc.csum.lo,
-		csum.hi,
-		csum.lo,
+		le64_to_cpu(op->crc.csum.hi),
+		le64_to_cpu(op->crc.csum.lo),
+		le64_to_cpu(csum.hi),
+		le64_to_cpu(csum.lo),
 		op->crc.csum_type < BCH_CSUM_NR
 		? __bch2_csum_types[op->crc.csum_type]
 		: "(unknown)");
