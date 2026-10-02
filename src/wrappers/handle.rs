@@ -499,7 +499,7 @@ impl BcachefsHandle {
             return Err(Errno(libc::EIO));
         }
         let sb = unsafe { &*(buf.as_ptr() as *const bch_sb) };
-        Ok(sb.version)
+        Ok(u16::from_le(sb.version))
     }
 
     /// Query device usage (v2 with flex array, v1 fallback).
