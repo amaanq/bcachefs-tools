@@ -39,11 +39,13 @@ void strip_fs_alloc(struct bch_fs *c)
 	struct bch_sb_field_clean *clean = bch2_sb_field_get(c->disk_sb.sb, clean);
 	struct jset_entry *entry = clean->start;
 
-	unsigned u64s = clean->field.u64s;
+	unsigned full_u64s = le32_to_cpu(clean->field.u64s);
+
 	while (entry != vstruct_end(&clean->field)) {
 		if (entry->type == BCH_JSET_ENTRY_btree_root &&
 		    btree_id_is_alloc(entry->btree_id)) {
-			clean->field.u64s -= jset_u64s(entry->u64s);
+			le32_add_cpu(&clean->field.u64s,
+				     -(s32) jset_u64s(le16_to_cpu(entry->u64s)));
 			memmove(entry,
 				vstruct_next(entry),
 				vstruct_end(&clean->field) - (void *) vstruct_next(entry));
@@ -52,7 +54,10 @@ void strip_fs_alloc(struct bch_fs *c)
 		}
 	}
 
-	swap(u64s, clean->field.u64s);
+	unsigned u64s = le32_to_cpu(clean->field.u64s);
+
+	/* resize() reads vstruct_end(f) before overwriting f->u64s */
+	clean->field.u64s = cpu_to_le32(full_u64s);
 	bch2_sb_field_resize(&c->disk_sb, clean, u64s);
 
 	scoped_guard(percpu_write_noio, &c->capacity.mark_lock) {
