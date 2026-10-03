@@ -472,7 +472,7 @@ int bch2_reattach_inode(struct btree_trans *trans, struct bch_inode_unpacked *in
 						BTREE_ID_subvolumes, POS(0, inode->bi_subvol),
 						0, subvolume));
 
-		subvol->v.fs_path_parent = BCACHEFS_ROOT_SUBVOL;
+		subvol->v.fs_path_parent = cpu_to_le32(BCACHEFS_ROOT_SUBVOL);
 
 		try(bch2_subvolume_get_snapshot(trans, inode->bi_parent_subvol, &dirent_snapshot));
 
