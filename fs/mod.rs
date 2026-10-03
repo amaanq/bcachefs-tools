@@ -117,8 +117,8 @@ pub mod c {
     impl bch_sb_field_crypt {
         pub fn scrypt_flags(&self) -> Option<bch_scrypt_flags> {
             use core::convert::TryInto;
-            match bch_kdf_types(bch_crypt_flags(self.flags).TYPE().try_into().ok()?) {
-                bch_kdf_types::BCH_KDF_SCRYPT => Some(bch_scrypt_flags(self.kdf_flags)),
+            match bch_kdf_types(bch_crypt_flags(u64::from_le(self.flags)).TYPE().try_into().ok()?) {
+                bch_kdf_types::BCH_KDF_SCRYPT => Some(bch_scrypt_flags(u64::from_le(self.kdf_flags))),
                 _ => None,
             }
         }
