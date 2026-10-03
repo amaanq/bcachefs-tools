@@ -1963,7 +1963,8 @@ static int do_reconcile(struct moving_context *ctxt)
 out:
 	if (!ret && !bkey_deleted(&pending_cookie.k))
 		try(bch2_clear_reconcile_needs_scan(trans,
-				pending_cookie.k.p, pending_cookie.v.cookie));
+				pending_cookie.k.p,
+				le64_to_cpu(pending_cookie.v.cookie)));
 
 	/*
 	 * Data that moved this pass - converted to EC, say - may have freed
