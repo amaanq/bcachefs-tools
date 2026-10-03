@@ -179,13 +179,13 @@ impl DiskAccountingKind {
             }
         }
 
-        // Reverse memcpy_swab: reverse bytes back into bpos layout
+        // Reverse memcpy_swab into the LE bpos layout on both architectures
         raw.reverse();
 
         DiskAccountingPos(c::bpos {
-            snapshot: u32::from_ne_bytes(raw[0..4].try_into().unwrap()),
-            offset:   u64::from_ne_bytes(raw[4..12].try_into().unwrap()),
-            inode:    u64::from_ne_bytes(raw[12..20].try_into().unwrap()),
+            snapshot: u32::from_le_bytes(raw[0..4].try_into().unwrap()),
+            offset:   u64::from_le_bytes(raw[4..12].try_into().unwrap()),
+            inode:    u64::from_le_bytes(raw[12..20].try_into().unwrap()),
         })
     }
 }
@@ -230,19 +230,19 @@ impl AccountingEntry {
 /// Decode a bpos into a DiskAccountingKind by byte-reversing the 20-byte bpos
 /// (memcpy_swab on little-endian) and parsing the type-tagged union.
 fn bpos_to_accounting_kind(p: &c::bpos) -> DiskAccountingKind {
-    // bpos is 20 bytes: on little-endian, the accounting pos is the
-    // byte-reversed form. We copy to a 20-byte LE array, then reverse all bytes.
+    // C reverses the 20-byte bpos on little-endian and copies it on big-endian.
+    // Serializing the integers into the LE layout gives the same accounting bytes.
     let mut raw = [0u8; BPOS_SIZE];
 
-    // Copy bpos fields into raw bytes in memory order (LE: snapshot, offset, inode)
-    let snap_bytes = p.snapshot.to_ne_bytes();
-    let off_bytes = p.offset.to_ne_bytes();
-    let ino_bytes = p.inode.to_ne_bytes();
+    // Copy bpos fields into the LE layout
+    let snap_bytes = p.snapshot.to_le_bytes();
+    let off_bytes = p.offset.to_le_bytes();
+    let ino_bytes = p.inode.to_le_bytes();
     raw[0..4].copy_from_slice(&snap_bytes);
     raw[4..12].copy_from_slice(&off_bytes);
     raw[12..20].copy_from_slice(&ino_bytes);
 
-    // memcpy_swab: reverse all 20 bytes
+    // Reverse the LE bpos layout into accounting bytes
     raw.reverse();
 
     // Match on raw discriminant — no transmute, unknown types safely fall to Unknown
