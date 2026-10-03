@@ -136,22 +136,20 @@ fn parse_accounting_entries(data: &[u8]) -> Vec<AccountingEntry> {
 
         let entry_data = &data[offset..offset + entry_bytes];
 
-        // bkey header is 5 u64s (40 bytes). The bpos is at the end of the bkey.
-        // On little-endian: bkey layout is [u64s(1B), format:nw(1B), type(1B), pad(1B),
-        //                                   bversion(12B), size(4B), bpos(20B)]
-        // bpos starts at byte 20 (offset 20..40)
+        // bkey header is 5 u64s (40 bytes), copied in native layout by the kernel.
+        // The bpos begins at byte 20 on LE and byte 3 on BE.
+        // Its native field order is snapshot, offset, inode on LE
+        // and inode, offset, snapshot on BE.
         const BKEY_U64S: usize = 5;
-        const BPOS_OFFSET: usize = 20;
+        const BPOS_OFFSET: usize = std::mem::offset_of!(c::bkey, p);
 
         if entry_bytes < BKEY_U64S * 8 {
             break;
         }
 
         // Extract bpos
-        let mut bpos = c::bpos {
-            snapshot: u32::from_ne_bytes(entry_data[BPOS_OFFSET..BPOS_OFFSET+4].try_into().unwrap()),
-            offset: u64::from_ne_bytes(entry_data[BPOS_OFFSET+4..BPOS_OFFSET+12].try_into().unwrap()),
-            inode: u64::from_ne_bytes(entry_data[BPOS_OFFSET+12..BPOS_OFFSET+20].try_into().unwrap()),
+        let mut bpos = unsafe {
+            entry_data.as_ptr().add(BPOS_OFFSET).cast::<c::bpos>().read_unaligned()
         };
 
         if need_swab {
