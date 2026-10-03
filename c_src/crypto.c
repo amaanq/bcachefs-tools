@@ -199,7 +199,7 @@ void bch_sb_crypt_init(struct bch_sb *sb,
 	struct bch_key key;
 	get_random_bytes(&key, sizeof(key));
 
-	crypt->key.magic = BCH_KEY_MAGIC;
+	crypt->key.magic = cpu_to_le64(BCH_KEY_MAGIC);
 	crypt->key.key = key;
 
 	bch_crypt_update_passphrase(sb, crypt, &key, passphrase);
@@ -226,7 +226,7 @@ void bch_crypt_update_passphrase(
 {
 
 	struct bch_encrypted_key new_key;
-	new_key.magic = BCH_KEY_MAGIC;
+	new_key.magic = cpu_to_le64(BCH_KEY_MAGIC);
 	new_key.key = *key;
 
 	if(!new_passphrase) {
