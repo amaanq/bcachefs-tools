@@ -1113,8 +1113,8 @@ void bch2_inode_alloc_cursor_to_text(struct printbuf *out, struct bch_fs *c,
 	u64 min, max, idx = le64_to_cpu(i.v->idx);
 	cursor_idx_min_max(c, k.k->p.offset, &min, &max);
 
-	prt_printf(out, "min %llu max %llu consumed %llu idx %llu generation %llu",
-		   min, max, idx - min, idx, le64_to_cpu(i.v->generation));
+	prt_printf(out, "min %llu max %llu consumed %llu idx %llu generation %u",
+		   min, max, idx - min, idx, le32_to_cpu(i.v->generation));
 }
 
 static struct bkey_i_inode_alloc_cursor *
@@ -1181,7 +1181,7 @@ int bch2_inode_create(struct btree_trans *trans,
 			    (k.k->type == KEY_TYPE_inode_generation &&
 			     bch2_snapshot_is_ancestor(trans, snapshot, k.k->p.snapshot))) {
 				inode_u->bi_inum	= pos;
-				inode_u->bi_generation	= le64_to_cpu(cursor->v.generation);
+				inode_u->bi_generation	= le32_to_cpu(cursor->v.generation);
 				cursor->v.idx		= cpu_to_le64(pos + 1);
 
 				if (k.k)
