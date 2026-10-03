@@ -177,7 +177,7 @@ fn cmd_undump(cli: UndumpCli) -> Result<()> {
 
 // ---- Sanitize implementation ----
 
-// On-disk struct sizes (all __packed, little-endian x86_64)
+// On-disk struct sizes (fixed across byte orders)
 const JSET_HDR: usize = 56;            // offsetof(jset, _data)
 const JSET_ENTRY_HDR: usize = 8;       // offsetof(jset_entry, start)
 const BSET_HDR: usize = 24;            // offsetof(bset, _data)
@@ -234,20 +234,49 @@ const MEMBER_INVALID: u64 = c::BCH_SB_MEMBER_INVALID as u64;
 /// device index and set every other pointer's device to `BCH_SB_MEMBER_INVALID`.
 /// Returns whether it changed anything. The surviving replica is the one the
 /// dump actually wrote, and the only one the read path will consider.
-fn derep(fs: &Fs, mut k: BkeyS) -> bool {
+fn derep(fs: &Fs, mut k: BkeyS, needs_swab: bool) -> bool {
+    if needs_swab {
+        let raw = c::bkey_s {
+            __bindgen_anon_1: c::bkey_s__bindgen_ty_1 {
+                __bindgen_anon_1: c::bkey_s__bindgen_ty_1__bindgen_ty_1 {
+                    k: &mut *k.k,
+                    v: &mut *k.v,
+                },
+            },
+        };
+
+        unsafe { c::bch2_bkey_swab_val(fs.raw, raw) };
+    }
+
     let min_dev = bkey_ptrs_mut(fs, &mut k)
         .map(|p| p.dev())
         .filter(|&d| d != MEMBER_INVALID)
         .min();
-    let Some(min_dev) = min_dev else { return false };
-
     let mut modified = false;
-    for p in bkey_ptrs_mut(fs, &mut k) {
-        if p.dev() != min_dev {
-            p.set_dev(MEMBER_INVALID);
-            modified = true;
+
+    if let Some(min_dev) = min_dev {
+        for p in bkey_ptrs_mut(fs, &mut k) {
+            if p.dev() != min_dev {
+                p.set_dev(MEMBER_INVALID);
+                modified = true;
+            }
         }
     }
+
+    // bch2_ptr_swab only goes foreign to native, but btree pointers hold
+    // nothing but ptr entries, so swapping each word converts them back.
+    if needs_swab {
+        let ptrs_start = if k.key_type() == c::bch_bkey_type::KEY_TYPE_btree_ptr_v2 {
+            std::mem::offset_of!(c::bch_btree_ptr_v2, start)
+        } else {
+            0
+        };
+
+        for word in k.val_bytes_mut()[ptrs_start..].chunks_exact_mut(8) {
+            word.reverse();
+        }
+    }
+
     modified
 }
 
@@ -256,7 +285,7 @@ fn derep(fs: &Fs, mut k: BkeyS) -> bool {
 /// filenames). Called for every key in both btree nodes and journal entries, so
 /// de-replication reaches the btree_root pointers carried in the journal as well
 /// as the interior/leaf pointers in btree nodes. Returns whether it modified.
-fn sanitize_val(fs: &Fs, mut k: BkeyS, opts: SanitizeOpts) -> bool {
+fn sanitize_val(fs: &Fs, mut k: BkeyS, opts: SanitizeOpts, needs_swab: bool) -> bool {
     const BTREE_PTR:            c::bch_bkey_type = c::bch_bkey_type::KEY_TYPE_btree_ptr;
     const BTREE_PTR_V2:         c::bch_bkey_type = c::bch_bkey_type::KEY_TYPE_btree_ptr_v2;
     const INLINE_DATA:          c::bch_bkey_type = c::bch_bkey_type::KEY_TYPE_inline_data;
@@ -264,7 +293,7 @@ fn sanitize_val(fs: &Fs, mut k: BkeyS, opts: SanitizeOpts) -> bool {
     const DIRENT:               c::bch_bkey_type = c::bch_bkey_type::KEY_TYPE_dirent;
 
     match k.key_type() {
-        BTREE_PTR | BTREE_PTR_V2 if opts.single_replica => derep(fs, k),
+        BTREE_PTR | BTREE_PTR_V2 if opts.single_replica => derep(fs, k, needs_swab),
         INLINE_DATA if opts.sanitize => {
             k.val_bytes_mut().fill(0);
             true
@@ -294,13 +323,14 @@ fn sanitize_journal_keys(
     start: usize,
     end: usize,
     opts: SanitizeOpts,
+    needs_swab: bool,
 ) -> bool {
     let mut modified = false;
     let mut pos = start;
 
     while pos + 3 <= end {
         let key_u64s = buf[pos] as usize;
-        if key_u64s == 0 {
+        if key_u64s < BKEY_U64S {
             break;
         }
 
@@ -311,8 +341,18 @@ fn sanitize_journal_keys(
 
         // Journal keys are always unpacked, so buf[pos..] is a bkey_i.
         let ki = unsafe { &mut *(buf.as_mut_ptr().add(pos) as *mut c::bkey_i) };
-        if sanitize_val(fs, BkeyS::from(ki), opts) {
+        let packed = ki as *mut c::bkey_i as *mut c::bkey_packed;
+
+        if needs_swab {
+            unsafe { c::bch2_bkey_swab_key(&c::bch2_bkey_format_current, packed) };
+        }
+
+        if sanitize_val(fs, BkeyS::from(&mut *ki), opts, needs_swab) {
             modified = true;
+        }
+
+        if needs_swab {
+            unsafe { c::bch2_bkey_swab_key(&c::bch2_bkey_format_current, packed) };
         }
 
         pos += key_bytes;
@@ -340,7 +380,9 @@ fn sanitize_journal(fs_raw: *mut c::bch_fs, buf: &mut [u8], opts: SanitizeOpts) 
             break;
         }
 
-        let csum_type = read_le32(buf, pos + 36) & 0xf;
+        let flags = read_le32(buf, pos + 36);
+        let csum_type = flags & 0xf;
+        let needs_swab = (flags & (1 << 4) != 0) != cfg!(target_endian = "big");
         let mut modified = false;
 
         if csum_type_is_encryption(csum_type) {
@@ -373,7 +415,7 @@ fn sanitize_journal(fs_raw: *mut c::bch_fs, buf: &mut [u8], opts: SanitizeOpts) 
             let entry_type = buf[entry_pos + 4];
             if (entry_type == 0 || entry_type == 1 || entry_type == 11)
                 && sanitize_journal_keys(&fs, buf, entry_pos + JSET_ENTRY_HDR,
-                                         entry_end, opts) {
+                                         entry_end, opts, needs_swab) {
                 modified = true;
             }
 
@@ -449,7 +491,9 @@ fn sanitize_btree(fs_raw: *mut c::bch_fs, buf: &mut [u8], opts: SanitizeOpts) {
             break;
         }
 
-        let csum_type = read_le32(buf, bset_off + 16) & 0xf;
+        let flags = read_le32(buf, bset_off + 16);
+        let csum_type = flags & 0xf;
+        let needs_swab = (flags & (1 << 4) != 0) != cfg!(target_endian = "big");
         let mut modified = false;
 
         if csum_type_is_encryption(csum_type) {
@@ -494,6 +538,11 @@ fn sanitize_btree(fs_raw: *mut c::bch_fs, buf: &mut [u8], opts: SanitizeOpts) {
 
             if val_off < key_bytes {
                 let vs = key_pos + val_off;
+                let packed = unsafe { buf.as_mut_ptr().add(key_pos) as *mut c::bkey_packed };
+
+                if needs_swab {
+                    unsafe { c::bch2_bkey_swab_key(format_ptr, packed) };
+                }
 
                 // An unpacked key (KEY_FORMAT_CURRENT) is a bkey_i in place; a
                 // packed key is unpacked into a local bkey using the node format
@@ -517,8 +566,12 @@ fn sanitize_btree(fs_raw: *mut c::bch_fs, buf: &mut [u8], opts: SanitizeOpts) {
                     BkeyS::from(ki)
                 };
 
-                if sanitize_val(&fs, k, opts) {
+                if sanitize_val(&fs, k, opts, needs_swab) {
                     modified = true;
+                }
+
+                if needs_swab {
+                    unsafe { c::bch2_bkey_swab_key(format_ptr, packed) };
                 }
             }
 
